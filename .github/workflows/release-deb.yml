@@ -3,6 +3,7 @@ name: Build & publish .deb packages
 on:
   push:
     tags: ["v*"]           # run only on version‑style tags
+  workflow_dispatch: 
 
 jobs:
   build-deb:
@@ -41,7 +42,7 @@ jobs:
         run: cross build --release --target ${{ matrix.target }}
 
       - name: Create .deb
-        run: cross deb --target ${{ matrix.target }} --no-build
+        run: cargo deb --target ${{ matrix.target }} --no-build
 
       - uses: actions/upload-artifact@v4
         with:
