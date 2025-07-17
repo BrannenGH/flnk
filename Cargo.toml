@@ -1,0 +1,26 @@
+[package]
+name = "flnk"
+version = "0.0.1"
+edition = "2024"
+
+[package.metadata.deb]
+maintainer           = "Brannen Hall <brannen@hallb.me>"
+copyright            = "2025, Brannen Hall"
+extended-description = """
+An enhancement to the Unix `ln` command, providing recursive directory linking capabilities.
+"""
+depends              = "$auto"
+section              = "utils"
+priority             = "optional"
+assets = [
+   ["target/release/flnk",        "usr/bin/",      "755"],
+   ["man/flnk.1.gz",       "usr/share/man/man1/", "644"],
+]
+
+[dependencies]
+clap = "4.5.41"
+crossterm = "0.29.0"
+pathdiff = "0.2.3"
+ratatui = "0.29.0"
+tempfile = "3.20.0"
+walkdir = "2.5.0"

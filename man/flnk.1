@@ -1,0 +1,68 @@
+.TH FLNK 1 "July 2025" "flnk 0.1.0" "User Commands"
+.SH NAME
+flnk \- create hard or symbolic links to one or more files
+.SH SYNOPSIS
+.B flnk
+[\fIOPTIONS\fR] \fITARGET\fR... [\fIDIRECTORY\fR]
+.br
+.B flnk
+[\fIOPTIONS\fR] \fITARGET\fR [\fILINK_NAME\fR]
+.br
+.B flnk
+\fB-u\fR
+.SH DESCRIPTION
+\fBflnk\fR creates hard or symbolic links between files, with additional features like backup, verbosity, and UI mode.
+
+By default, it creates hard links. Use \fB-s\fR to create symbolic links instead.
+
+.SH OPTIONS
+.TP
+\fB-s\fR, \fB--symbolic\fR
+Make symbolic links instead of hard links.
+.TP
+\fB-f\fR, \fB--force\fR
+Remove existing destination files before linking.
+.TP
+\fB-b\fR
+Make a backup of each existing destination file.
+.TP
+\fB-r\fR, \fB--relative\fR
+With \fB-s\fR, create links relative to the link location.
+.TP
+\fB-v\fR, \fB--verbose\fR
+Print the name of each file as it's linked.
+.TP
+\fB-t\fR \fIDIRECTORY\fR
+Specify the directory in which to create links.
+.TP
+\fB-S\fR \fISUFFIX\fR
+Override the default backup suffix (default is \fB~\fR).
+.TP
+\fB-u\fR
+Run in UI mode. This disables the required positional arguments and launches the application in an interactive mode.
+.TP
+\fITARGET\fR...
+One or more source files to link from. At least one required unless \fB-u\fR is used.
+
+.SH USAGE
+.TP
+Link a file into a directory:
+.B flnk foo.txt /some/dir
+.TP
+Create symbolic links:
+.B flnk -s foo.txt bar.txt
+.TP
+Link multiple files into a directory with verbosity:
+.B flnk -v file1 file2 file3 /dest/dir
+.TP
+Use UI mode:
+.B flnk -u
+
+.SH EXIT STATUS
+Returns 0 on success. Returns non-zero if any linking operation fails.
+
+.SH AUTHOR
+Written by Brannen Hall.
+
+.SH SEE ALSO
+.BR ln (1),

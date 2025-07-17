@@ -1,0 +1,66 @@
+name: Build & publish .deb packages
+
+on:
+  push:
+    tags: ["v*"]           # run only on version‑style tags
+
+jobs:
+  build-deb:
+    name: Build for ${{ matrix.target }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
+          - riscv64gc-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross & cargo-deb
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross --locked
+          cargo install cargo-deb --locked
+
+      - name: Gzip man pages
+        run: |
+          mkdir -p man
+          for f in man/*.1; do
+            [ -f "$f" ] && gzip -kf "$f"
+          done
+
+      - name: Cross compile binary
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Create .deb
+        run: cross deb --target ${{ matrix.target }} --no-build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.target }}
+          path: target/debian/*.deb
+
+  publish:
+    name: Draft GitHub Release with all .deb files
+    needs: build-deb
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # required for release upload
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./debs           
+
+      - name: Create / update release from tag
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./debs/**/*.deb
+          draft: false
