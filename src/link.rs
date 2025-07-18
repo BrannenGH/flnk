@@ -139,10 +139,15 @@ pub fn link_files(
     let dest_path = Path::new(dest);
     let mut linked = Vec::new();
 
-    for entry in WalkDir::new(source_path) {
+    for (i, entry) in WalkDir::new(source_path).into_iter().enumerate() {
         let entry = entry?;
         let path = entry.path();
         let metadata = entry.metadata()?;
+
+        // '.' is returned as first entry, need to skip it.
+        if i == 0 && metadata.is_dir() {
+            continue;
+        }
 
         // Skip non-regular files for hard links
         if !metadata.is_file() && !opts.symbolic {
@@ -193,6 +198,7 @@ pub fn link_files(
 mod tests {
     use super::*;
     use std::fs::File;
+    use std::fs::create_dir_all;
     use std::io::Write;
     use tempfile::TempDir;
     use tempfile::tempdir;
@@ -248,6 +254,48 @@ mod tests {
 
         assert_eq!(linked.len(), 1);
         assert!(dest.join("file1.txt").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_complex_hard_link() -> io::Result<()> {
+        let ((_source_dir, source), (_dest_dir, dest)) = setup_test_env()?;
+        let test_files = [
+            source.join("file1.txt"),
+            source.join("file2.txt"),
+            source.join("filesToLink/file3.txt"),
+        ];
+
+        for file in &test_files {
+            if let Some(parent) = file.parent() {
+                create_dir_all(parent)?;
+            }
+
+            match File::create(file) {
+                Ok(mut f) => f.write_all(b"test content")?,
+                Err(e) => {
+                    eprintln!(
+                        "💥  couldn’t create {} → kind={:?}, os_code={:?}, msg={}",
+                        &file.display(),
+                        e.kind(),         // high‑level category
+                        e.raw_os_error(), // underlying errno, if any
+                        e                 // human‑readable message
+                    );
+                    return Err(e);
+                }
+            }
+        }
+
+        let opts = LinkOptions::default();
+        let linked = link_files(
+            source.to_str().unwrap(),
+            dest.to_str().unwrap(),
+            Some(&opts),
+        )?;
+
+        assert_eq!(linked.len(), 3);
+        assert!(dest.join("file2.txt").exists());
+        assert!(dest.join("filesToLink/file3.txt").exists());
         Ok(())
     }
 
