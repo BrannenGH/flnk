@@ -2,15 +2,19 @@ name: Build & publish .deb packages
 
 on:
   push:
-    tags: ["v*"]           # run only on version‑style tags
-  workflow_dispatch: 
+    tags: ['v*']           # run only on version‑style tags
+  workflow_dispatch:
+
+permissions:
+  contents: write          # needed by the release job
 
 jobs:
   build-deb:
-    name: Build for ${{ matrix.target }}
+    name: Build & package ${{ matrix.target }}
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
         target:
           - x86_64-unknown-linux-gnu
@@ -21,16 +25,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      # Host toolchain so we can build the `cross` binary
+      - name: Install Rust (host)
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
-      - name: Install cross & cargo-deb
-        run: |
-          cargo install cross --git https://github.com/cross-rs/cross --locked
-          cargo install cargo-deb --locked
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross --locked
 
+      # ────────────────────────────────────────────────────────────────
+      # 1️⃣ Build the release binary inside the target container
+      - name: Build release binary
+        run: cross build --release --target ${{ matrix.target }}
+
+      # Optional: compress any man pages
       - name: Gzip man pages
         run: |
           mkdir -p man
@@ -38,27 +45,48 @@ jobs:
             [ -f "$f" ] && gzip -kf "$f"
           done
 
-      - name: Cross compile binary
-        run: cross build --release --target ${{ matrix.target }}
+      # ────────────────────────────────────────────────────────────────
+      # 2️⃣ Pull the cross image (its own step, as requested)
+      - name: Pull cross image for ${{ matrix.target }}
+        run: docker pull ghcr.io/cross-rs/${{ matrix.target }}:latest
 
-      - name: Create .deb
-        run: cargo deb --target ${{ matrix.target }} --no-build
+      # 3️⃣ Package the binary inside that image
+      - name: Package .deb inside cross container
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          img="ghcr.io/cross-rs/${TARGET}:latest"
+
+          docker run --rm \
+            --env TARGET="$TARGET" \
+            -v "$PWD":/work \
+            -w /work \
+            "$img" bash -ec '
+              # Make sure the Rust toolchain is on PATH
+              source "$HOME/.cargo/env"
+
+              # Install cargo‑deb inside the container once
+              if ! command -v cargo-deb >/dev/null 2>&1; then
+                cargo install cargo-deb --locked
+              fi
+
+              # Package without rebuilding or stripping again
+              cargo deb --no-build --no-strip --target "$TARGET"
+            '
 
       - uses: actions/upload-artifact@v4
         with:
           name: deb-${{ matrix.target }}
-          path: target/debian/*.deb
+          path: target/${{ matrix.target }}/debian/*.deb
 
   publish:
     name: Draft GitHub Release with all .deb files
     needs: build-deb
     runs-on: ubuntu-latest
-    permissions:
-      contents: write       # required for release upload
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: ./debs           
+          path: ./debs
 
       - name: Create / update release from tag
         uses: softprops/action-gh-release@v2
