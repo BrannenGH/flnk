@@ -197,6 +197,7 @@ pub fn link_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
     use std::fs::File;
     use std::fs::create_dir_all;
     use std::io::Write;
@@ -254,6 +255,50 @@ mod tests {
 
         assert_eq!(linked.len(), 1);
         assert!(dest.join("file1.txt").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_relative_hard_link_with_spaces() -> io::Result<()> {
+        let ((_source_dir, source), (_dest_dir, dest)) = setup_test_env()?;
+        let test_files = [
+            source.join("myDir/file 3 to link.txt"),
+        ];
+
+        for file in &test_files {
+            if let Some(parent) = file.parent() {
+                create_dir_all(parent)?;
+            }
+
+            match File::create(file) {
+                Ok(mut f) => f.write_all(b"test content")?,
+                Err(e) => {
+                    eprintln!(
+                        "💥  couldn’t create {} → kind={:?}, os_code={:?}, msg={}",
+                        &file.display(),
+                        e.kind(),         // high‑level category
+                        e.raw_os_error(), // underlying errno, if any
+                        e                 // human‑readable message
+                    );
+                    return Err(e);
+                }
+            }
+        }
+
+        let prev = env::current_dir()?;
+        env::set_current_dir(&dest)?;
+
+        let opts = LinkOptions::default();
+        let linked = link_files(
+            &(source.to_str().unwrap().to_owned() + "/myDir/file 3 to link.txt"),
+            ".",
+            Some(&opts),
+        )?;
+
+        assert_eq!(linked.len(), 1);
+        assert!(dest.join("file 3 to link.txt").exists());
+
+        env::set_current_dir(prev)?;
         Ok(())
     }
 
