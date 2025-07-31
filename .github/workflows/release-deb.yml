@@ -1,22 +1,22 @@
-name: Build & publish .deb packages
+name: Build & publish release
 
 on:
   push:
-    tags: ["v*"]           # run only on version‑style tags
-  workflow_dispatch: 
+    tags: ["v*"]
+  workflow_dispatch:
 
 jobs:
-  build-deb:
+  build:
     name: Build for ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-          - aarch64-unknown-linux-gnu
-          - armv7-unknown-linux-gnueabihf
-          - riscv64gc-unknown-linux-gnu
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: buildjet-2vcpu-ubuntu-2204
+          - target: aarch64-unknown-linux-gnu
+            runner: buildjet-2vcpu-ubuntu-2204-arm
 
     steps:
       - uses: actions/checkout@v4
@@ -26,10 +26,8 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross & cargo-deb
-        run: |
-          cargo install cross --git https://github.com/cross-rs/cross --locked
-          cargo install cargo-deb --locked
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
 
       - name: Gzip man pages
         run: |
@@ -38,30 +36,41 @@ jobs:
             [ -f "$f" ] && gzip -kf "$f"
           done
 
-      - name: Cross compile binary
-        run: cross build --release --target ${{ matrix.target }}
+      - name: Build binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package tarball
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/flnk dist/
+          cp man/*.1.gz dist/ || true
+          tar -C dist -czf flnk-${{ matrix.target }}.tar.gz .
 
       - name: Create .deb
         run: cargo deb --target ${{ matrix.target }} --no-build
 
       - uses: actions/upload-artifact@v4
         with:
-          name: deb-${{ matrix.target }}
-          path: target/debian/*.deb
+          name: artifacts-${{ matrix.target }}
+          path: |
+            flnk-${{ matrix.target }}.tar.gz
+            target/debian/*.deb
 
   publish:
-    name: Draft GitHub Release with all .deb files
-    needs: build-deb
+    name: Draft GitHub Release
+    needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # required for release upload
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: ./debs           
+          path: ./artifacts
 
       - name: Create / update release from tag
         uses: softprops/action-gh-release@v2
         with:
-          files: ./debs/**/*.deb
+          files: |
+            ./artifacts/**/*.deb
+            ./artifacts/**/*.tar.gz
           draft: false
