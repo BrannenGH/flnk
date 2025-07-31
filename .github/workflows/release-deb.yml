@@ -8,13 +8,15 @@ on:
 jobs:
   build:
     name: Build for ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-          - aarch64-unknown-linux-gnu
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: buildjet-4vcpu-ubuntu-22.04-arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -24,10 +26,8 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross & cargo-deb
-        run: |
-          cargo install cross --git https://github.com/cross-rs/cross --locked
-          cargo install cargo-deb --locked
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
 
       - name: Gzip man pages
         run: |
@@ -36,8 +36,8 @@ jobs:
             [ -f "$f" ] && gzip -kf "$f"
           done
 
-      - name: Cross compile binary
-        run: cross build --release --target ${{ matrix.target }}
+      - name: Build binary
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package tarball
         run: |
