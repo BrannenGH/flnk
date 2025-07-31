@@ -1,8 +1,7 @@
-mod link;
-mod ui;
-
-use crate::link::{LinkOptions, link_files};
 use clap::{Arg, ArgAction, Command};
+use flnk::link::link_files::link_files;
+use flnk::link::link_options::LinkOptions;
+use flnk::ui;
 use std::path::PathBuf;
 use std::process;
 
@@ -73,7 +72,6 @@ fn main() {
         force: matches.get_flag("force"),
         backup: matches.get_flag("backup"),
         relative: matches.get_flag("relative"),
-        verbose: matches.get_flag("verbose"),
         backup_suffix: matches.get_one::<String>("suffix").unwrap().clone(),
         symlink_files_only: false,
     };
@@ -118,10 +116,8 @@ fn main() {
 fn handle_link_files(target: &str, link_name: &str, opts: &LinkOptions) -> Result<(), String> {
     match link_files(target, link_name, Some(opts)) {
         Ok(linked_files) => {
-            if opts.verbose {
-                for file in linked_files {
-                    println!("Created link: {}", file.display());
-                }
+            for file in linked_files {
+                println!("Created link: {}", file.display());
             }
             Ok(())
         }
