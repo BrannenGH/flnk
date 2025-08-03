@@ -148,6 +148,9 @@ fn test_complex_hard_link() -> io::Result<()> {
         b"test content",
     )?;
 
+    let prev = env::current_dir()?;
+    env::set_current_dir(&dst)?;
+
     let linked = link_files(
         src.to_str().unwrap(),
         dst.to_str().unwrap(),
@@ -156,6 +159,8 @@ fn test_complex_hard_link() -> io::Result<()> {
     assert_eq!(linked.len(), 3);
     assert!(dst.join("file2.txt").exists());
     assert!(dst.join("filesToLink/file3.txt").exists());
+
+    env::set_current_dir(prev)?;
     Ok(())
 }
 
