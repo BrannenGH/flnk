@@ -165,6 +165,36 @@ fn test_complex_hard_link() -> io::Result<()> {
 }
 
 #[test]
+fn test_hard_link_to_sub_directory() -> io::Result<()> {
+    let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
+
+    create_test_files(
+        [
+            src.join("myDir/file1.txt"),
+            src.join("myDir/file2.txt"),
+            src.join("filesToLink/file3.txt"),
+            dst.join("destDir/subDir/file 10.mp4")
+        ],
+        b"test content",
+    )?;
+
+    let prev = env::current_dir()?;
+    env::set_current_dir(&dst)?;
+
+    let linked = link_files(
+        &(src.to_str().unwrap().to_owned() + "/myDir"),
+        &(dst.to_str().unwrap().to_owned() + "/destDir/subDir"),
+        Some(&LinkOptions::default()),
+    )?;
+    assert_eq!(linked.len(), 2);
+    assert!(dst.join("destDir/subDir/myDir/file1.txt").exists());
+    assert!(dst.join("destDir/subDir/myDir/file2.txt").exists());
+
+    env::set_current_dir(prev)?;
+    Ok(())
+}
+
+#[test]
 fn test_backup_option() -> io::Result<()> {
     let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
     let src_file = src.join("file1.txt");
