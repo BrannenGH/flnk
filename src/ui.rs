@@ -1,4 +1,5 @@
-use crate::link::{LinkOptions, link_files};
+use crate::link::link_files::link_files;
+use crate::link::link_options::LinkOptions;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,

@@ -2,7 +2,6 @@ name: Build & Test
 
 on:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
@@ -32,4 +31,4 @@ jobs:
         run: cargo build --workspace --all-targets --locked
 
       - name: Run tests
-        run: cargo test --workspace --all-targets --locked --no-fail-fast
+        run: cargo test --workspace --all-targets --locked --no-fail-fast -- --test-threads=1
