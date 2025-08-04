@@ -1,7 +1,8 @@
 use crate::link::link_files::link_files;
 use crate::link::link_options::LinkOptions;
-use std::{env, fs, io, path::Path, path::PathBuf};
-use tempfile::{TempDir, tempdir};
+use pathdiff::diff_paths;
+use std::{env, fs, io, path::Path, path::PathBuf, sync::Mutex};
+use tempfile::{tempdir, TempDir};
 
 /// ------------------------------------------------------------
 /// helpers
@@ -43,6 +44,20 @@ where
     Ok(())
 }
 
+static CWD_LOCK: Mutex<()> = Mutex::new(());
+
+fn with_cwd<F, R>(dir: &Path, f: F) -> io::Result<R>
+where
+    F: FnOnce() -> io::Result<R>,
+{
+    let _guard = CWD_LOCK.lock().unwrap();
+    let prev = env::current_dir()?;
+    env::set_current_dir(dir)?;
+    let result = f();
+    env::set_current_dir(prev)?;
+    result
+}
+
 /// ------------------------------------------------------------
 /// tests
 /// ------------------------------------------------------------
@@ -68,21 +83,16 @@ fn test_relative_hard_link_with_spaces() -> io::Result<()> {
     let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
 
     create_test_files([src.join("myDir/file 3 to link.txt")], b"test content")?;
-
-    let prev = env::current_dir()?;
-    env::set_current_dir(&dst)?;
-
-    let linked = link_files(
-        &(src.to_str().unwrap().to_owned() + "/myDir/file 3 to link.txt"),
-        ".",
-        Some(&LinkOptions::default()),
-    )?;
-
-    assert_eq!(linked.len(), 1);
-    assert!(dst.join("file 3 to link.txt").exists());
-
-    env::set_current_dir(prev)?;
-    Ok(())
+    with_cwd(&dst, || {
+        let linked = link_files(
+            &(src.to_str().unwrap().to_owned() + "/myDir/file 3 to link.txt"),
+            ".",
+            Some(&LinkOptions::default()),
+        )?;
+        assert_eq!(linked.len(), 1);
+        assert!(dst.join("file 3 to link.txt").exists());
+        Ok(())
+    })
 }
 
 #[test]
@@ -95,22 +105,18 @@ fn test_relative_hard_link_with_wildcard() -> io::Result<()> {
         src.join("myDir/subDir/mov.nfo"),
     ], b"test content")?;
 
-    let prev = env::current_dir()?;
-    env::set_current_dir(&dst)?;
-
-    let linked = link_files(
-        &(src.to_str().unwrap().to_owned() + "/myDir/*"),
-        ".",
-        Some(&LinkOptions::default()),
-    )?;
-
-    assert_eq!(linked.len(), 3);
-    assert!(dst.join("file 3 to link.txt").exists());
-    assert!(dst.join("subDir/mov.mp4").exists());
-    assert!(dst.join("subDir/mov.nfo").exists());
-
-    env::set_current_dir(prev)?;
-    Ok(())
+    with_cwd(&dst, || {
+        let linked = link_files(
+            &(src.to_str().unwrap().to_owned() + "/myDir/*"),
+            ".",
+            Some(&LinkOptions::default()),
+        )?;
+        assert_eq!(linked.len(), 3);
+        assert!(dst.join("file 3 to link.txt").exists());
+        assert!(dst.join("subDir/mov.mp4").exists());
+        assert!(dst.join("subDir/mov.nfo").exists());
+        Ok(())
+    })
 }
 
 #[test]
@@ -118,21 +124,16 @@ fn test_relative_hard_link_to_directory() -> io::Result<()> {
     let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
 
     create_test_files([src.join("myDir/file 3 to link.txt")], b"test content")?;
-
-    let prev = env::current_dir()?;
-    env::set_current_dir(&dst)?;
-
-    let linked = link_files(
-        &(src.to_str().unwrap().to_owned() + "/myDir"),
-        ".",
-        Some(&LinkOptions::default()),
-    )?;
-
-    assert_eq!(linked.len(), 1);
-    assert!(dst.join("myDir/file 3 to link.txt").exists());
-
-    env::set_current_dir(prev)?;
-    Ok(())
+    with_cwd(&dst, || {
+        let linked = link_files(
+            &(src.to_str().unwrap().to_owned() + "/myDir"),
+            ".",
+            Some(&LinkOptions::default()),
+        )?;
+        assert_eq!(linked.len(), 1);
+        assert!(dst.join("myDir/file 3 to link.txt").exists());
+        Ok(())
+    })
 }
 
 #[test]
@@ -148,9 +149,6 @@ fn test_complex_hard_link() -> io::Result<()> {
         b"test content",
     )?;
 
-    let prev = env::current_dir()?;
-    env::set_current_dir(&dst)?;
-
     let linked = link_files(
         src.to_str().unwrap(),
         dst.to_str().unwrap(),
@@ -160,7 +158,6 @@ fn test_complex_hard_link() -> io::Result<()> {
     assert!(dst.join("file2.txt").exists());
     assert!(dst.join("filesToLink/file3.txt").exists());
 
-    env::set_current_dir(prev)?;
     Ok(())
 }
 
@@ -173,24 +170,24 @@ fn test_hard_link_to_sub_directory() -> io::Result<()> {
             src.join("myDir/file1.txt"),
             src.join("myDir/file2.txt"),
             src.join("filesToLink/file3.txt"),
-            dst.join("destDir/subDir/file 10.mp4")
+            dst.join("destDir/subDir/file 10.mp4"),
         ],
         b"test content",
     )?;
 
-    let prev = env::current_dir()?;
-    env::set_current_dir(&dst)?;
+    let cwd = env::current_dir()?;
+    let dest_sub = dst.join("destDir/subDir");
+    let dest_rel = diff_paths(&dest_sub, &cwd).unwrap();
 
     let linked = link_files(
         &(src.to_str().unwrap().to_owned() + "/myDir"),
-        &(dst.to_str().unwrap().to_owned() + "/destDir/subDir"),
+        dest_rel.to_str().unwrap(),
         Some(&LinkOptions::default()),
     )?;
     assert_eq!(linked.len(), 2);
     assert!(dst.join("destDir/subDir/myDir/file1.txt").exists());
     assert!(dst.join("destDir/subDir/myDir/file2.txt").exists());
 
-    env::set_current_dir(prev)?;
     Ok(())
 }
 
