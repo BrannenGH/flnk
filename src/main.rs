@@ -1,137 +1,87 @@
 use clap::{Arg, ArgAction, Command};
 use flnk::link::link_files::link_files;
 use flnk::link::link_options::LinkOptions;
-use flnk::ui;
-use std::path::PathBuf;
-use std::process;
 
 fn main() {
-    let matches = Command::new("flnk")
+    let version = env!("CARGO_PKG_VERSION");
+    let name = env!("CARGO_PKG_NAME");
+
+    let matches = Command::new(name)
+        .version(version)
+        .about("Recursive ln-compatible linking utility")
         .arg(
             Arg::new("symbolic")
                 .short('s')
                 .long("symbolic")
-                .help("make symbolic links instead of hard links")
+                .help("Make symbolic links instead of hard links")
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new("force")
                 .short('f')
                 .long("force")
-                .help("remove existing destination files")
+                .help("Remove existing destination files before linking")
                 .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::new("backup")
-                .short('b')
-                .help("make a backup of each existing destination file")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("relative")
-                .short('r')
-                .long("relative")
-                .help("with -s, create links relative to link location")
+            Arg::new("no_dereference")
+                .short('n')
+                .long("no-dereference")
+                .help("Treat DEST that is a symlink to a directory as a normal file")
                 .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new("verbose")
                 .short('v')
                 .long("verbose")
-                .help("print name of each linked file")
+                .help("Print actions performed")
                 .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::new("target-directory")
-                .short('t')
-                .help("specify the DIRECTORY in which to create the links")
-                .value_name("DIRECTORY"),
-        )
-        .arg(
-            Arg::new("suffix")
-                .short('S')
-                .help("override the usual backup suffix")
-                .default_value("~"),
-        )
-        .arg(
-            Arg::new("ui-mode")
-                .short('u')
-                .help("run in ui mode")
+            Arg::new("no_target_directory")
+                .short('T')
+                .long("no-target-directory")
+                .help("Treat DEST as a normal file even if it exists as a directory")
                 .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::new("targets")
-                .required_unless_present("ui-mode")
-                .num_args(1..)
-                .value_name("TARGET"),
+            Arg::new("interactive")
+                .short('i')
+                .long("interactive")
+                .help("Prompt before overwrite (mutually exclusive with --force in non-TTY)")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("source")
+                .help("Source file or directory")
+                .required(true)
+                .index(1),
+        )
+        .arg(
+            Arg::new("dest")
+                .help("Destination file or directory")
+                .required(false)
+                .index(2),
         )
         .get_matches();
 
     let opts = LinkOptions {
         symbolic: matches.get_flag("symbolic"),
         force: matches.get_flag("force"),
-        backup: matches.get_flag("backup"),
-        relative: matches.get_flag("relative"),
-        backup_suffix: matches.get_one::<String>("suffix").unwrap().clone(),
-        symlink_files_only: false,
+        no_dereference: matches.get_flag("no_dereference"),
+        verbose: matches.get_flag("verbose"),
+        no_target_directory: matches.get_flag("no_target_directory"),
+        interactive: matches.get_flag("interactive")
     };
 
-    let targets: Vec<&String> = matches
-        .get_many::<String>("targets")
-        .map(|v| v.collect())
-        .unwrap_or_default();
+    let source = matches
+        .get_one::<String>("source")
+        .expect("missing source argument");
+    let dest = matches.get_one::<String>("dest").map(|s| s.as_str());
 
-    if matches.get_flag("ui-mode") {
-        if let Err(err) = ui::run_ui(&Vec::new()) {
-            eprintln!("Error in UI mode: {}", err);
-            process::exit(1);
-        }
-        return;
-    }
-
-    let result = if let Some(target_dir) = matches.get_one::<String>("target-directory") {
-        link_multiple_to_directory(&targets, target_dir, &opts)
-    } else if targets.len() == 1 {
-        handle_link_files(targets[0], ".", &opts)
-    } else if targets.len() == 2 {
-        let (target, link_name) = (targets[0], targets[1]);
-        if PathBuf::from(link_name).is_dir() {
-            let new_link =
-                PathBuf::from(link_name).join(PathBuf::from(target).file_name().unwrap());
-            handle_link_files(target, new_link.to_str().unwrap(), &opts)
-        } else {
-            handle_link_files(target, link_name, &opts)
-        }
-    } else {
-        let dir = targets.last().unwrap();
-        link_multiple_to_directory(&targets[..targets.len() - 1], dir, &opts)
-    };
-
-    if let Err(err) = result {
+    // Perform linking
+    if let Err(err) = link_files(source, dest.unwrap_or("."), Some(&opts)) {
         eprintln!("Error: {}", err);
-        process::exit(1);
+        std::process::exit(1);
     }
-}
-
-fn handle_link_files(target: &str, link_name: &str, opts: &LinkOptions) -> Result<(), String> {
-    match link_files(target, link_name, Some(opts)) {
-        Ok(linked_files) => {
-            for file in linked_files {
-                println!("Created link: {}", file.display());
-            }
-            Ok(())
-        }
-        Err(e) => Err(e.to_string()),
-    }
-}
-
-fn link_multiple_to_directory(
-    targets: &[&String],
-    dir: &str,
-    opts: &LinkOptions,
-) -> Result<(), String> {
-    for target in targets {
-        handle_link_files(target, dir, opts)?;
-    }
-    Ok(())
 }

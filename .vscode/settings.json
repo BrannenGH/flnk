@@ -4,4 +4,8 @@
         "**/.cargo/git/checkouts/**/*.rs": true,
         "**/lib/rustlib/src/rust/library/**/*.rs": true,
     },
+    "python.testing.pytestArgs": ["e2e"],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "python.defaultInterpreterPath": "e2e/.venv/bin/python",
 }

@@ -8,3 +8,8 @@ test/
 
 #GZ man pages (done at build time)
 man/*.gz
+
+# e2e Python
+__pycache__/
+.pytest_cache/
+.venv/

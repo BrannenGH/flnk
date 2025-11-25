@@ -1,268 +1,185 @@
 use crate::link::link_files::link_files;
 use crate::link::link_options::LinkOptions;
-use std::{env, fs, io, path::Path, path::PathBuf};
-use tempfile::{TempDir, tempdir};
+use crate::link::test_env::TestEnv;
+use std::{fs, io};
 
-/// ------------------------------------------------------------
-/// helpers
-/// ------------------------------------------------------------
-
-/// A tmp dir plus a `PathBuf` pointing to a child directory we can work in.
-fn create_temp_dir(name: &str) -> io::Result<(TempDir, PathBuf)> {
-    let temp = tempdir()?;
-    let dir_path = temp.path().join(name);
-    fs::create_dir_all(&dir_path)?;
-    Ok((temp, dir_path))
-}
-
-fn setup_test_env() -> io::Result<((TempDir, PathBuf), (TempDir, PathBuf))> {
-    Ok((create_temp_dir("src")?, create_temp_dir("dest")?))
-}
-
-/// Create **one** file (auto-makes parent dirs).
-fn create_test_file(path: impl AsRef<Path>, content: impl AsRef<[u8]>) -> io::Result<()> {
-    let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, content)?;
-    Ok(())
-}
-
-/// Create the same `content` in *every* file from `files`.
-pub fn create_test_files<I, P, C>(files: I, content: C) -> io::Result<()>
-where
-    I: IntoIterator<Item = P>,
-    P: AsRef<Path>,
-    C: AsRef<[u8]>,
-{
-    let bytes = content.as_ref(); // avoid re-calling as_ref in loop
-    for p in files {
-        create_test_file(p, bytes)?;
-    }
-    Ok(())
-}
-
-/// ------------------------------------------------------------
-/// tests
-/// ------------------------------------------------------------
-
+/// Expectation: Behaves like ln for single files (hard link default)
 #[test]
-fn test_basic_hard_link() -> io::Result<()> {
-    let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
-
-    create_test_files([src.join("file1.txt")], b"test content")?;
+fn test_basic_hard_link() -> Result<(), Box<dyn std::error::Error>> {
+    let test_env = TestEnv::new(&["src", "dest"], &["src/file1.txt"])?;
 
     let linked = link_files(
-        src.to_str().unwrap(),
-        dst.to_str().unwrap(),
-        Some(&LinkOptions::default()),
-    )?;
-    assert_eq!(linked.len(), 1);
-    assert!(dst.join("file1.txt").exists());
-    Ok(())
-}
-
-#[test]
-fn test_relative_hard_link_with_spaces() -> io::Result<()> {
-    let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
-
-    create_test_files([src.join("myDir/file 3 to link.txt")], b"test content")?;
-
-    let prev = env::current_dir()?;
-    env::set_current_dir(&dst)?;
-
-    let linked = link_files(
-        &(src.to_str().unwrap().to_owned() + "/myDir/file 3 to link.txt"),
-        ".",
+        test_env.sub_folders[0].to_str().unwrap(),
+        test_env.sub_folders[1].to_str().unwrap(),
         Some(&LinkOptions::default()),
     )?;
 
     assert_eq!(linked.len(), 1);
-    assert!(dst.join("file 3 to link.txt").exists());
-
-    env::set_current_dir(prev)?;
+    assert!(test_env.sub_folders[1].join("file1.txt").exists());
     Ok(())
 }
 
+/// Expectation: `-s/--symbolic` creates a symbolic link
 #[test]
-fn test_relative_hard_link_with_wildcard() -> io::Result<()> {
-    let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
+fn test_basic_symbolic_link() -> Result<(), Box<dyn std::error::Error>> {
+    let test_env = TestEnv::new(&["src", "dest"], &["src/file1.txt"])?;
+    let src = &test_env.sub_folders[0];
+    let dst = &test_env.sub_folders[1];
 
-    create_test_files([
-        src.join("myDir/file 3 to link.txt"),
-        src.join("myDir/subDir/mov.mp4"),
-        src.join("myDir/subDir/mov.nfo"),
-    ], b"test content")?;
+    let mut opts = LinkOptions::default();
+    opts.symbolic = true;
 
-    let prev = env::current_dir()?;
-    env::set_current_dir(&dst)?;
-
-    let linked = link_files(
-        &(src.to_str().unwrap().to_owned() + "/myDir/*"),
-        ".",
-        Some(&LinkOptions::default()),
-    )?;
-
-    assert_eq!(linked.len(), 3);
-    assert!(dst.join("file 3 to link.txt").exists());
-    assert!(dst.join("subDir/mov.mp4").exists());
-    assert!(dst.join("subDir/mov.nfo").exists());
-
-    env::set_current_dir(prev)?;
-    Ok(())
-}
-
-#[test]
-fn test_relative_hard_link_to_directory() -> io::Result<()> {
-    let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
-
-    create_test_files([src.join("myDir/file 3 to link.txt")], b"test content")?;
-
-    let prev = env::current_dir()?;
-    env::set_current_dir(&dst)?;
-
-    let linked = link_files(
-        &(src.to_str().unwrap().to_owned() + "/myDir"),
-        ".",
-        Some(&LinkOptions::default()),
-    )?;
-
+    let linked = link_files(src.to_str().unwrap(), dst.to_str().unwrap(), Some(&opts))?;
     assert_eq!(linked.len(), 1);
-    assert!(dst.join("myDir/file 3 to link.txt").exists());
 
-    env::set_current_dir(prev)?;
+    let md = fs::symlink_metadata(dst.join("file1.txt"))?;
+    assert!(md.file_type().is_symlink());
     Ok(())
 }
 
+/// Expectation: rename-style path works when parent exists (DEST does not exist)
 #[test]
-fn test_complex_hard_link() -> io::Result<()> {
-    let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
+fn test_rename_style_when_parent_exists() -> Result<(), Box<dyn std::error::Error>> {
+    let test_env = TestEnv::new(&["src", "dest"], &["src/original.txt"])?;
+    let src = test_env.sub_folders[0].to_str().unwrap();
+    let dst = test_env.sub_folders[1].join("renamed.txt");
 
-    create_test_files(
-        [
-            src.join("file1.txt"),
-            src.join("file2.txt"),
-            src.join("filesToLink/file3.txt"),
+    let linked = link_files(src, dst.to_str().unwrap(), Some(&LinkOptions::default()))?;
+    assert_eq!(linked.len(), 1);
+    assert!(dst.exists());
+    Ok(())
+}
+
+/// Expectation: fails when DEST parent directory is missing (single-file mode)
+#[test]
+fn test_fail_when_parent_dir_missing() -> Result<(), Box<dyn std::error::Error>> {
+    let test_env = TestEnv::new(&["src"], &["src/original.txt"])?;
+    let src = test_env.sub_folders[0].to_str().unwrap();
+    let missing_parent = test_env._root_temp_dir.join("missing_parent").join("newname.txt");
+
+    let res = link_files(src, missing_parent.to_str().unwrap(), Some(&LinkOptions::default()));
+    assert!(res.is_err());
+    Ok(())
+}
+
+/// Expectation: If DEST exists and is a directory, link goes inside (single file)
+#[test]
+fn test_single_file_into_existing_directory() -> Result<(), Box<dyn std::error::Error>> {
+    let test_env = TestEnv::new(&["src", "dest"], &["src/a.txt"])?;
+    let linked = link_files(
+        test_env.sub_folders[0].join("a.txt").to_str().unwrap(),
+        test_env.sub_folders[1].to_str().unwrap(),
+        Some(&LinkOptions::default()),
+    )?;
+    assert_eq!(linked.len(), 1);
+    assert!(test_env.sub_folders[1].join("a.txt").exists());
+    Ok(())
+}
+
+/// Expectation: Directory recursion preserves tree structure and creates directories as needed
+#[test]
+fn test_directory_recursive_hard_links() -> Result<(), Box<dyn std::error::Error>> {
+    let test_env = TestEnv::new(
+        &["src", "dest"],
+        &[
+            "src/file1.txt",
+            "src/file2.txt",
+            "src/sub/file3.txt",
+            "src/sub/nested/file4.txt",
         ],
-        b"test content",
     )?;
-
-    let prev = env::current_dir()?;
-    env::set_current_dir(&dst)?;
 
     let linked = link_files(
-        src.to_str().unwrap(),
-        dst.to_str().unwrap(),
+        test_env.sub_folders[0].to_str().unwrap(),
+        test_env.sub_folders[1].to_str().unwrap(),
         Some(&LinkOptions::default()),
     )?;
+
+    assert_eq!(linked.len(), 4);
+    assert!(test_env.sub_folders[1].join("file1.txt").exists());
+    assert!(test_env.sub_folders[1].join("file2.txt").exists());
+    assert!(test_env.sub_folders[1].join("sub/file3.txt").exists());
+    assert!(test_env.sub_folders[1].join("sub/nested/file4.txt").exists());
+    Ok(())
+}
+
+/// Expectation: Recursive with -s produces symlinks at all leaf files
+#[test]
+fn test_directory_recursive_symbolic_links() -> Result<(), Box<dyn std::error::Error>> {
+    let test_env = TestEnv::new(
+        &["src", "dest"],
+        &[
+            "src/f1.txt",
+            "src/f2.txt",
+            "src/dirA/g1.txt",
+        ],
+    )?;
+    let src = test_env.sub_folders[0].to_str().unwrap();
+    let dst = test_env.sub_folders[1].to_str().unwrap();
+
+    let mut opts = LinkOptions::default();
+    opts.symbolic = true;
+
+    let linked = link_files(src, dst, Some(&opts))?;
     assert_eq!(linked.len(), 3);
-    assert!(dst.join("file2.txt").exists());
-    assert!(dst.join("filesToLink/file3.txt").exists());
-
-    env::set_current_dir(prev)?;
+    assert!(fs::symlink_metadata(test_env.sub_folders[1].join("f1.txt"))?.file_type().is_symlink());
+    assert!(fs::symlink_metadata(test_env.sub_folders[1].join("f2.txt"))?.file_type().is_symlink());
+    assert!(fs::symlink_metadata(test_env.sub_folders[1].join("dirA/g1.txt"))?.file_type().is_symlink());
     Ok(())
 }
 
+/// Expectation: `-f` overwrites existing destination
 #[test]
-fn test_backup_option() -> io::Result<()> {
-    let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
-    let src_file = src.join("file1.txt");
-    let dst_file = dst.join("file1.txt");
+fn test_force_overwrite_existing() -> Result<(), Box<dyn std::error::Error>> {
+    let test_env = TestEnv::new(
+        &["src", "dest"],
+        &["src/a.txt", "dest/a.txt"],
+    )?;
 
-    create_test_files([&src_file], b"new content")?;
-    create_test_files([&dst_file], b"existing content")?;
+    let mut opts = LinkOptions::default();
+    opts.force = true;
 
-    let opts = LinkOptions {
-        backup: true,
-        backup_suffix: "~".into(),
-        force: true,
-        ..Default::default()
-    };
-
-    link_files(src.to_str().unwrap(), dst.to_str().unwrap(), Some(&opts))?;
-
-    assert!(dst_file.exists());
-    assert!(dst.join("file1.txt~").exists());
+    let linked = link_files(
+        test_env.sub_folders[0].join("a.txt").to_str().unwrap(),
+        test_env.sub_folders[1].to_str().unwrap(),
+        Some(&opts),
+    )?;
+    assert_eq!(linked.len(), 1);
+    assert!(test_env.sub_folders[1].join("a.txt").exists());
     Ok(())
 }
 
+/// Expectation: Without -f/-i, linking to existing file should error
 #[test]
-fn test_force_option() -> io::Result<()> {
-    let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
-    let src_file = src.join("file1.txt");
-    let dst_file = dst.join("file1.txt");
-
-    create_test_files([&src_file], b"new content")?;
-    create_test_files([&dst_file], b"existing content")?;
-
-    let opts = LinkOptions {
-        force: true,
-        ..Default::default()
-    };
-
-    link_files(src.to_str().unwrap(), dst.to_str().unwrap(), Some(&opts))?;
-    assert!(dst_file.exists());
-    Ok(())
-}
-
-#[test]
-fn test_existing_file_no_force() -> io::Result<()> {
-    let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
-    let src_file = src.join("file1.txt");
-    let dst_file = dst.join("file1.txt");
-
-    create_test_files([&src_file], b"new content")?;
-    create_test_files([&dst_file], b"existing content")?;
+fn test_existing_file_without_force_errors() -> Result<(), Box<dyn std::error::Error>> {
+    let test_env = TestEnv::new(
+        &["src", "dest"],
+        &["src/a.txt", "dest/a.txt"],
+    )?;
 
     let res = link_files(
-        src.to_str().unwrap(),
-        dst.to_str().unwrap(),
+        test_env.sub_folders[0].join("a.txt").to_str().unwrap(),
+        test_env.sub_folders[1].to_str().unwrap(),
         Some(&LinkOptions::default()),
     );
     assert!(res.is_err());
     Ok(())
 }
 
+/// Expectation: -T no-target-directory treats DEST as a file path even if directory exists
 #[test]
-fn test_symbolic_link() -> io::Result<()> {
-    let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
+fn test_no_target_directory_flag() -> Result<(), Box<dyn std::error::Error>> {
+    let test_env = TestEnv::new(&["src", "dest"], &["src/foo.txt"])?;
 
-    create_test_files([src.join("file1.txt")], b"test content")?;
+    let mut opts = LinkOptions::default();
+    opts.no_target_directory = true; // corresponds to -T
 
-    let opts = LinkOptions {
-        symbolic: true,
-        ..Default::default()
-    };
-
-    let linked = link_files(src.to_str().unwrap(), dst.to_str().unwrap(), Some(&opts))?;
-    assert_eq!(linked.len(), 1);
-    assert!(
-        fs::symlink_metadata(dst.join("file1.txt"))?
-            .file_type()
-            .is_symlink()
+    // Try to treat 'dest' dir as a file path; should error like ln (can't link directory path as file)
+    let res = link_files(
+        test_env.sub_folders[0].join("foo.txt").to_str().unwrap(),
+        test_env.sub_folders[1].to_str().unwrap(),
+        Some(&opts),
     );
-    Ok(())
-}
-
-#[test]
-fn test_relative_symbolic_link() -> io::Result<()> {
-    let ((_src_tmp, src), (_dst_tmp, dst)) = setup_test_env()?;
-
-    create_test_files([src.join("file1.txt")], b"test content")?;
-
-    let opts = LinkOptions {
-        symbolic: true,
-        relative: true,
-        ..Default::default()
-    };
-
-    let linked = link_files(src.to_str().unwrap(), dst.to_str().unwrap(), Some(&opts))?;
-    assert_eq!(linked.len(), 1);
-    assert!(
-        fs::symlink_metadata(dst.join("file1.txt"))?
-            .file_type()
-            .is_symlink()
-    );
+    assert!(res.is_err());
     Ok(())
 }

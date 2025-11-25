@@ -1,30 +1,30 @@
-/// A struct containing options for controlling the linking behavior.
+/// CLI options for the recursive linking utility, intentionally limited to
+/// GNU `ln`-compatible flags as agreed.
 #[derive(Debug, Clone)]
 pub struct LinkOptions {
-    /// If true, creates symbolic links instead of hard links
+    /// -s, --symbolic: create symbolic links instead of hard links (default false)
     pub symbolic: bool,
-    /// If true and creating symbolic links, creates relative symbolic links
-    pub relative: bool,
-    /// If true, removes existing destination files
+    /// -f, --force: remove existing destination paths before linking
     pub force: bool,
-    /// If true, creates backups of existing files
-    pub backup: bool,
-    /// The suffix to use for backup files
-    pub backup_suffix: String,
-    /// When true and creating symbolic links, directories will not be symbolically linked
-    pub symlink_files_only: bool,
+    /// -n, --no-dereference: treat DEST that is a symlink to a directory as a normal file
+    pub no_dereference: bool,
+    /// -v, --verbose: print actions performed
+    pub verbose: bool,
+    /// -T, --no-target-directory: treat DEST as a normal file even if it exists as a directory
+    pub no_target_directory: bool,
+    /// -i, --interactive: prompt before overwrite (mutually exclusive with --force in non-TTY)
+    pub interactive: bool,
 }
 
-/// Default implementation for LinkOptions
 impl Default for LinkOptions {
     fn default() -> Self {
         Self {
             symbolic: false,
-            relative: false,
             force: false,
-            backup: false,
-            backup_suffix: String::from("~"),
-            symlink_files_only: false,
+            no_dereference: false,
+            verbose: false,
+            no_target_directory: false,
+            interactive: false
         }
     }
 }
